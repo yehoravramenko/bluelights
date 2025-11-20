@@ -1,0 +1,17 @@
+﻿---
+BasedOnStyle: Microsoft
+AlignAfterOpenBracket: Align
+AlignConsecutiveMacros: 'true'
+AlignConsecutiveAssignments: 'true'
+AlignEscapedNewlines: Right
+AlignOperands: 'true'
+AlignTrailingComments: 'true'
+AllowAllArgumentsOnNextLine: 'true'
+AllowShortFunctionsOnASingleLine: InlineOnly
+ColumnLimit: '80'
+# IndentWidth: '4'
+PointerAlignment: Right
+UseTab: Never
+SortIncludes: Never
+
+...
