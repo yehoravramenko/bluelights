@@ -63,3 +63,7 @@ compile_commands.json
 
 *.vcxproj*
 *.sln*
+
+bin/*
+obj/*
+*.exe.old
