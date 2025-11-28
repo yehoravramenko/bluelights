@@ -10,14 +10,36 @@
 #define SRC_DIR   "src\\"
 #define EXE_NAME  "bluelights.exe"
 
-#define CARGS "/nologo", "/Wall", "/std:c++latest", "/EHsc", "/c"
+#define CARGS                                                                  \
+    "/nologo", "/W4", "/WX", "/Yupch.hpp", "/Fp" BUILD_DIR OBJ_DIR "pch.pch",  \
+        "/std:c++latest", "/EHsc", "/c"
+
 #define LARGS "/nologo"
 
 int main(int argc, char **argv)
 {
+    NOB_GO_REBUILD_URSELF(argc, argv);
+
+    if (argc > 1 && strcmp(argv[1], "pch") == 0)
+    {
+        Nob_Cmd cmd = {0};
+        nob_cmd_append(&cmd, "cl", "/Ycpch.hpp", "/std:c++latest", "/EHsc",
+                       "/c", "/W4", "/Fp" BUILD_DIR OBJ_DIR "pch.pch",
+                       "/Fo:build\\obj\\pch.obj", SRC_DIR "pch.cpp");
+
+        if (!nob_cmd_run(&cmd))
+            return 1;
+
+        return 0;
+    }
+
     const char *files[] = {"main", "\0"};
 
-    NOB_GO_REBUILD_URSELF(argc, argv);
+    if (!nob_file_exists(BUILD_DIR OBJ_DIR "pch.pch"))
+    {
+        printf("run with pch arg\n");
+        return 1;
+    }
 
     if (nob_file_exists("nob.obj"))
         nob_delete_file("nob.obj");
@@ -32,8 +54,7 @@ int main(int argc, char **argv)
 
     nob_set_current_dir(ROOT_DIR);
 
-    Nob_Cmd cmd                  = {};
-    Nob_String_Builder obj_files = {0};
+    Nob_Cmd cmd = {};
 
     for (int i = 0; strcmp(files[i], "\0") != 0; ++i)
     {
@@ -46,18 +67,13 @@ int main(int argc, char **argv)
 
         nob_cmd_append(&cmd, "cl", CARGS, obj_buf, src_buf);
 
-        nob_sb_appendf(&obj_files, "%s%s%s.obj ", BUILD_DIR, OBJ_DIR, files[i]);
-
         if (!nob_cmd_run(&cmd))
             return 1;
     }
 
-    nob_sb_append_null(&obj_files);
+    nob_cmd_append(&cmd, "link", LARGS, "build\\obj\\*.obj",
+                   "/OUT:build\\bin\\" EXE_NAME);
 
-    char link_buf[1024] = {0};
-    snprintf(link_buf, 1024, "/OUT:%s%s%s", BUILD_DIR, BIN_DIR, EXE_NAME);
-
-    nob_cmd_append(&cmd, "link", LARGS, obj_files.items, link_buf);
     if (!nob_cmd_run(&cmd))
         return 1;
 
