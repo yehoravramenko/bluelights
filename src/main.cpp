@@ -1,9 +1,20 @@
 #include "pch.hpp"
+
+#include <ws2tcpip.h>
+#include <signal.h>
+
 #include <print>
 #include <iostream>
 #include <cstdlib>
 
 typedef unsigned long long u64;
+
+constexpr byte SET_COLOR_HEADER[] = {0x7e, 0x07, 0x05, 0x03};
+constexpr byte SET_COLOR_FOOTER[] = {0x10, 0xef};
+
+u64 currentColor = 0xCCFF00;
+
+bool exitRequest = false;
 
 // https://github.com/DerekGn/WinRtBle/blob/master/src/WinRTBle/Main.cpp#L12
 std::wstring uuidToString(GUID uuid)
@@ -71,34 +82,52 @@ winrt::Windows::Foundation::IAsyncAction openDevice(const u64 deviceAddress)
 
     DataWriter writer = DataWriter();
 
-    byte rawArrayDataOff[] = {0x7e, 0x07, 0x05, 0x03, /* header */
-                              0xff, 0x00, 0x00,       /* colors */
-                              0x10, 0xef /* footer */};
-    winrt::array_view<byte const> arrayDataOff{rawArrayDataOff};
+    /*
+        0xCC,
+        0xFF,
+        0x00,
+    */
 
-    writer.WriteBytes(arrayDataOff);
+    // byte rawColor[] = {
+    //     0xCC,
+    //     0xFF,
+    //     0x00,
+    // };
+    // winrt::array_view<byte const> color{rawColor};
+
+    writer.WriteBytes(winrt::array_view<byte const>{SET_COLOR_HEADER});
+    writer.WriteBytes(winrt::array_view<byte const>{(currentColor >> 16) & 0xFF,
+                                                    (currentColor >> 8) & 0xFF,
+                                                    currentColor & 0xFF});
+    // writer.WriteUInt64(currentColor);
+    writer.WriteBytes(winrt::array_view<byte const>{SET_COLOR_FOOTER});
+
+    auto ib = writer.DetachBuffer();
+    std::cout << ib.data()[0] << std::endl;
 
     GenericAttributeProfile::GattWriteResult res =
         co_await dataCharacteristic.WriteValueWithResultAsync(
-            writer.DetachBuffer(),
-            GenericAttributeProfile::GattWriteOption::WriteWithoutResponse);
+            ib, GenericAttributeProfile::GattWriteOption::WriteWithoutResponse);
 
-    if (res.Status() ==
+    if (res.Status() !=
         GenericAttributeProfile::GattCommunicationStatus::Success)
     {
-        std::println("PEREMAHA");
-        co_return;
+        std::println("Error in communication");
+        std::exit(1);
     }
+}
 
-    // Device Name
-    // L"00002a00-0000-1000-8000-00805f9b34fb"
+extern "C" int __cdecl interruptCalled(int, int)
+{
+    exitRequest = true;
+    return 0;
 }
 
 int main(int, char **)
 {
-    std::println("bluelights");
-
     std::atomic<u64> btAddr = 0;
+
+    signal(SIGINT, reinterpret_cast<_crt_signal_t>(&interruptCalled));
 
     using namespace winrt::Windows::Devices::Bluetooth::Advertisement;
 
@@ -127,7 +156,87 @@ int main(int, char **)
     if (btAddr == 0)
         return 1;
 
-    openDevice(btAddr).get();
+    WSADATA wsaData = {};
+    int wsaerr      = 0;
+
+    wsaerr = WSAStartup(MAKEWORD(2, 2), &wsaData);
+
+    if (wsaerr != 0)
+    {
+        std::println("WSAstartup error");
+        return 1;
+    }
+
+    SOCKET serverSocket = INVALID_SOCKET;
+
+    serverSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+
+    if (serverSocket == INVALID_SOCKET)
+    {
+        std::println("Failed to create a socket");
+        return 1;
+    }
+
+    sockaddr_in service = {};
+
+    service = {
+        .sin_family = AF_INET,
+        .sin_port   = htons(6969),
+    };
+    inet_pton(AF_INET, "127.0.0.1", &(service.sin_addr));
+
+    if (bind(serverSocket, reinterpret_cast<SOCKADDR *>(&service),
+             sizeof(service)) == SOCKET_ERROR)
+    {
+        std::println("Failed to bind socket");
+        closesocket(serverSocket);
+        WSACleanup();
+        return 1;
+    }
+
+    if (listen(serverSocket, 1) == SOCKET_ERROR)
+    {
+        std::println("Failed to listen");
+        closesocket(serverSocket);
+        WSACleanup();
+        return 1;
+    }
+
+    for (; exitRequest != true;)
+    {
+        std::println("Waiting for connection ...");
+
+        SOCKET acceptSocket = INVALID_SOCKET;
+        acceptSocket        = accept(serverSocket, nullptr, nullptr);
+
+        if (acceptSocket == INVALID_SOCKET)
+        {
+            std::println("Failed to accept");
+            closesocket(serverSocket);
+            WSACleanup();
+            return 1;
+        }
+
+        char receivedBuf[1024];
+        int byteCount = recv(acceptSocket, receivedBuf, 1024, 0);
+        if (byteCount < 0)
+        {
+            std::println("recv Error");
+            return 1;
+        }
+
+        std::string received{&(receivedBuf[byteCount - 6])};
+
+        u64 newColor = std::stoll(received, nullptr, 16);
+        if (newColor == currentColor)
+            continue;
+
+        currentColor = newColor;
+
+        openDevice(btAddr).get();
+    }
+
+    WSACleanup();
 
     return 0;
 }
